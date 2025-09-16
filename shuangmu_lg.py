@@ -28,8 +28,8 @@ matcher = LightGlue(features="superpoint").eval().to(device)
 
 
 if __name__ == "__main__":
-    left_img_path = "realsense_capture/depth_2_1042.png"
-    right_img_path = "realsense_capture/color_1_1042.png"
+    left_img_path = "realsense_capture/color_2_375.png"
+    right_img_path = "realsense_capture/color_1_375.png"
 
     # left_img_path = "realsense_capture/color_1_1042.png"
     # right_img_path = "realsense_capture/depth_2_1042.png"
@@ -59,8 +59,8 @@ if __name__ == "__main__":
     viz2d.add_text(0, f'Stop after {matches01["stop"]} layers', fs=20)
     viz2d.save_plot("test.png")
 
-    extri = cv2.FileStorage('extrinsics_realsense.yml', cv2.FILE_STORAGE_READ)
-    intri = cv2.FileStorage('intrinsics_realsense.yml', cv2.FILE_STORAGE_READ)
+    extri = cv2.FileStorage('extrinsics_realsense_20240429.yml', cv2.FILE_STORAGE_READ)
+    intri = cv2.FileStorage('intrinsics_realsense_20240429.yml', cv2.FILE_STORAGE_READ)
 
     M1 = intri.getNode('M1').mat()
     M2 = intri.getNode('M2').mat()

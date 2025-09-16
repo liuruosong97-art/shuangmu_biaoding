@@ -23,10 +23,18 @@
             "args": []
         },
         {
-            "name": "realsense_capture",
+            "name": "realsensed455_capture",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/realsense_capture.py",
+            "program": "${workspaceFolder}/realsensed455_capture.py",
+            "console": "integratedTerminal",
+            "args": []
+        },
+        {
+            "name": "jiegouguang_detectcircle",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "jiegouguang/jiegouguang_main.py",
             "console": "integratedTerminal",
             "args": []
         },
@@ -49,3 +57,5 @@
         }
     ]
 }
+
+
