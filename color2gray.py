@@ -2,8 +2,8 @@ import cv2
 import os
  
 img_list = []
-input_path = r"C:\Users\ZhaoYibin\Desktop\SDK_MVCamCtrl_Win_STD_V4.5.1_V2.5.1\shuangmu\imgs\realsense\color\right"  # 要处理的图片所在的文件夹
-output_path = r"C:\Users\ZhaoYibin\Desktop\SDK_MVCamCtrl_Win_STD_V4.5.1_V2.5.1\shuangmu\imgs\realsense\gray\right"  # 处理完的图片放在这里
+input_path = r"whx_biaoding/R/"  # 要处理的图片所在的文件夹
+output_path = r"whx_biaoding/gray/R/"  # 处理完的图片放在这里
 for item in os.listdir(input_path):
     img_list.append(os.path.join(input_path, item))
 print(list)
@@ -12,8 +12,8 @@ img_list.sort()
 for imagepath in img_list:
     # print(imagepath)
     image = cv2.imread(imagepath, cv2.IMREAD_GRAYSCALE)
-    print(output_path+'%dR.jpg' % count)  # 显示保存文件的路径及保存的文件名
-    cv2.imwrite(output_path+'%dR.jpg' % count, image)
+    print(output_path+'R%d.jpg' % count)  # 显示保存文件的路径及保存的文件名
+    cv2.imwrite(output_path+'R%d.jpg' % count, image)
     # 按一定路径将图片保存下来并命名，加号左边代表保存路径，右边代表文件命
     # %d代表后面的% count中的count的数值
     print("-----------执行中，保存第{}张----------".format(count+1))

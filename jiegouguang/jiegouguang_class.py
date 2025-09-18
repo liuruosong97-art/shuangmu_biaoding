@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import copy
 
 class JieGouGuang:
     def __init__(self,img1_path,img2_path):
@@ -11,7 +12,10 @@ class JieGouGuang:
     def extract_circle(self):
         centers_img1,img1_with_center = self.extract_circle_1(self.img1)
         centers_img2,img2_with_center = self.extract_circle_1(self.img2)
-        return centers_img1,centers_img2,img1_with_center,img2_with_center
+
+        self.centers_img1 = centers_img1
+        self.centers_img2 = centers_img2
+        return img1_with_center,img2_with_center
 
     def extract_circle_1(self,img):
         
@@ -71,6 +75,12 @@ class JieGouGuang:
         new_M1, roi1 = cv2.getOptimalNewCameraMatrix(M1, D1, (w, h), 1, (w, h))
         new_M2, roi2 = cv2.getOptimalNewCameraMatrix(M2, D2, (w, h), 1, (w, h))
 
+        self.K1 = new_M1
+        self.K2 = new_M2
+
+        self.cam_R = R
+        self.cam_t = t
+
         # 计算极线变换矩阵
         R1, R2, P1, P2, Q, roi1, roi2 = cv2.stereoRectify(new_M1, D1, new_M2, D2, (w, h), R, t, flags=cv2.CALIB_ZERO_TANGENT_DIST)
 
@@ -84,4 +94,81 @@ class JieGouGuang:
 
         self.img1_rectify = left_rectified
         self.img2_rectify = right_rectified
+
+
+    def feature_matching(self):
+        self.kp1_np = []
+        self.kp2_np = []
+        
+        sift = cv2.SIFT_create()
+        
+        img1 = copy.copy(self.img1_rectify)
+        img2 = copy.copy(self.img2_rectify)
+        kp1, des1 = sift.detectAndCompute(img1, None)
+        kp2, des2 = sift.detectAndCompute(img2, None)
+
+
+        bf = cv2.BFMatcher()
+        matches = bf.knnMatch(des1, des2, k=2)
+
+        good = []
+        for m, n in matches:
+            if m.distance < 0.75 * n.distance:
+                pt_1 = kp1[m.queryIdx].pt
+                pt_2 = kp2[m.trainIdx].pt
+
+                if abs(pt_1[1] - pt_2[1]) < 3:
+                    self.kp1_np.append(pt_1)
+                    self.kp2_np.append(pt_2)
+                    good.append([m])
+
+        self.kp1_np = np.array(self.kp1_np)
+        self.kp2_np = np.array(self.kp2_np)
+        img_matches = cv2.drawMatchesKnn(img1, kp1, img2, kp2, good, None, flags=2)
+        # cv2.imwrite('test.png', img_matches)
+        # Convert keypoints to numpy arrays
+
+
+        return img_matches
+    
+
+    def triangulate_points(self):
+        
+        pts1 = self.kp1_np.T
+        pts2 = self.kp2_np.T
+        # points_4d_hom = cv2.triangulatePoints(P1, P2, pts1, pts2)
+
+        pass
+
+    def draw_chess_board(self, img1, img2):
+        # Find chessboard corners
+
+        
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+        pattern_size = (11, 8)  # Adjust based on your chessboard size
+        
+        ret1, corners1 = cv2.findChessboardCorners(img1, pattern_size)
+        ret2, corners2 = cv2.findChessboardCorners(img2, pattern_size)
+        
+        if ret1 and ret2:
+            # Refine corner positions
+            corners1 = cv2.cornerSubPix(img1, corners1, (11,11), (-1,-1), criteria)
+            corners2 = cv2.cornerSubPix(img2, corners2, (11,11), (-1,-1), criteria)
+            
+            # Create combined image
+            h_img = cv2.hconcat([img1, img2])
+            h_img = cv2.cvtColor(h_img, cv2.COLOR_GRAY2BGR)
+            
+            # Draw corners and lines
+            w = img1.shape[1]
+            for i in range(len(corners1)):
+                pt1 = (int(corners1[i][0][0]), int(corners1[i][0][1]))
+                pt2 = (int(corners2[i][0][0]) + w, int(corners2[i][0][1]))
+                cv2.circle(h_img, pt1, 3, (0,255,0), -1)
+                cv2.circle(h_img, pt2, 3, (0,255,0), -1)
+                cv2.line(h_img, pt1, pt2, (0,0,255), 1)
+                
+            return h_img
+        
+        return None
 

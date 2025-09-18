@@ -3,8 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import open3d as o3d
 
-left_img_path = "d455_biaoding/left1.png"
-right_img_path = "d455_biaoding/right1.png"
+left_img_path = "whx_biaoding/L/left_0041.png"
+right_img_path = "whx_biaoding/right_0090.png"
 
 left_img = cv2.imread(left_img_path)
 right_img = cv2.imread(right_img_path)
@@ -18,8 +18,8 @@ target_height = int(left_img.shape[0] * scale)
 left_img_scaled = cv2.resize(left_img, (target_width, target_height))
 right_img_scaled = cv2.resize(right_img, (target_width, target_height))
 
-extri = cv2.FileStorage('biaoding/extrinsics_d435_20250915.yml', cv2.FILE_STORAGE_READ)
-intri = cv2.FileStorage('biaoding/intrinsics_d435_20250915.yml', cv2.FILE_STORAGE_READ)
+extri = cv2.FileStorage('biaoding/extrinsics_whx_zyb.yml', cv2.FILE_STORAGE_READ)
+intri = cv2.FileStorage('biaoding/intrinsics_whx_zyb.yml', cv2.FILE_STORAGE_READ)
 
 M1 = intri.getNode('M1').mat()
 M2 = intri.getNode('M2').mat()
