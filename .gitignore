@@ -1,5 +1,7 @@
 imgs
 test.png
+test.ply
+test.jpg
 *.pyc
 realsense_capture
 fanban
@@ -7,3 +9,5 @@ test.py
 d455_biaoding
 d455_jiegouguang_save
 whx_biaoding
+wucha/plots_rep/*
+wucha/stereo_fullfactorial_Zsweep.csv

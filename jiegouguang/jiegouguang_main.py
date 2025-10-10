@@ -22,12 +22,13 @@ img1_with_center,img2_with_center = jiegouguang_class.extract_circle()
 
 img_matches = jiegouguang_class.feature_matching()
 
-jiegouguang_class.triangulate_points()
+# jiegouguang_class.triangulate_points()
 
 
 # img_out = np.hstack((img1_with_center, img2_with_center))
 
 
 cv2.imwrite("test.png", img1_with_center)
+cv2.imwrite("test2.png", img2_with_center)
 print("end")
 

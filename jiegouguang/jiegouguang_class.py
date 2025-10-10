@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 import copy
+import open3d as o3d
+from scipy.optimize import curve_fit
 
 class JieGouGuang:
     def __init__(self,img1_path,img2_path):
@@ -21,9 +23,23 @@ class JieGouGuang:
         
         H,W = img.shape
         mean_light = img.mean()
-        _, binary_image = cv2.threshold(img, mean_light * 2, 255, cv2.THRESH_BINARY)
+        binary_image = cv2.adaptiveThreshold(
+            img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 19, -4
+        )
+        # 只保留少于30个像素的连通域
+        contours_filtered = []
+        for contour in cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
+            if cv2.contourArea(contour) < 20:
+                contours_filtered.append(contour)
+        contours = contours_filtered
 
-        contours, _ = cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # 重新绘制二值化图，只保留筛选后的连通域
+        binary_image_filtered = np.zeros_like(binary_image)
+        cv2.drawContours(binary_image_filtered, contours, -1, 255, -1)
+        binary_image = binary_image_filtered
+
+        # _, binary_image = cv2.threshold(img, mean_light * 2, 255, cv2.THRESH_BINARY)
+        # contours, _ = cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         img_with_center = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
         center_extracted = []
         for contour in contours:
@@ -34,23 +50,48 @@ class JieGouGuang:
             cY = int(M["m01"] / M["m00"])
 
             # 选择光斑周围的区域进行插值
-            bbox_size = 5
+            bbox_size = 3
             y_start = max(0, cY-bbox_size)
             y_end = min(H, cY+bbox_size)
             x_start = max(0, cX-bbox_size)
             x_end = min(W, cX+bbox_size)
             local_patch = img[y_start:y_end, x_start:x_end]
-            # subpixel_x = np.arange(x_start-cX, x_end-cX)
-            # subpixel_y = np.arange(y_start-cY, y_end-cY)
-            # X, Y = np.meshgrid(subpixel_x, subpixel_y)
 
-            max_pos = np.unravel_index(np.argmax(local_patch), local_patch.shape)
-            subpixel_center = (cX - bbox_size + max_pos[1], cY - bbox_size + max_pos[0])
-            # subpixel_center = (cX, cY)
-            # 在img上绘制subpixel_center点
-            
-            cv2.circle(img_with_center, (int(subpixel_center[0]), int(subpixel_center[1])), 1, (0,0,255), -1)
-            center_extracted.append([int(subpixel_center[0]), int(subpixel_center[1])])
+            # 将local_patch放大5倍
+            beishu = 20
+            patch_resized = cv2.resize(local_patch, (local_patch.shape[1]*beishu, local_patch.shape[0]*beishu))
+            # 计算放大后中心点坐标
+            # 先计算local_patch中最亮点的坐标
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(local_patch)
+            if max_val < 150:
+                continue
+            # 放大坐标
+            max_loc_resized = (max_loc[0] * beishu, max_loc[1] * beishu)
+            # 在放大后的patch上绘制中心
+            cv2.circle(patch_resized, max_loc_resized, 3, (0, 0, 255), -1)
+            # cv2.imwrite("test.png", patch_resized)
+            # cv2.imwrite("local_patch.png", local_patch)
+            center_x = x_start + max_loc[0] // 5
+            center_y = y_start + max_loc[1] // 5
+            # 在放大后的patch上绘制中心
+            cv2.circle(patch_resized, (max_loc[0], max_loc[1]), 3, (0, 0, 255), -1)
+            # 保存或显示patch_resized可选
+            # cv2.imwrite("patch_resized.png", patch_resized)
+
+            # 直接取局部区域最亮的点作为中心
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(local_patch)
+            if max_val<150:
+                continue
+            center_x = x_start + max_loc[0]
+            center_y = y_start + max_loc[1]
+            patch_resized = cv2.cvtColor(local_patch, cv2.COLOR_GRAY2BGR)
+            cx, cy = center_x, center_y
+            # cv2.circle(patch_resized, (int(max_loc[0]), int(max_loc[1])), 1, (0, 0, 255), -1)
+            # cv2.imwrite("test.png", patch_resized)
+            cv2.circle(img_with_center, (cx, cy), 1, (0,0,255), -1)
+            # cv2.circle(img_with_center, (int(subpixel_center[0]), int(subpixel_center[1])), 3, (0,0,255), -1)
+
+            center_extracted.append([cx,cy])
         return np.array(center_extracted), img_with_center
     
     def import_biaodin(self,extri_path,intri_path):
@@ -84,6 +125,11 @@ class JieGouGuang:
         # 计算极线变换矩阵
         R1, R2, P1, P2, Q, roi1, roi2 = cv2.stereoRectify(new_M1, D1, new_M2, D2, (w, h), R, t, flags=cv2.CALIB_ZERO_TANGENT_DIST)
 
+        self.P1 = P1
+        self.P2 = P2
+
+        self.Q = Q
+
         # 生成映射
         left_map_x, left_map_y = cv2.initUndistortRectifyMap(new_M1, D1, R1, P1, (w, h), cv2.CV_32FC1)
         right_map_x, right_map_y = cv2.initUndistortRectifyMap(new_M2, D2, R2, P2, (w, h), cv2.CV_32FC1)
@@ -97,39 +143,27 @@ class JieGouGuang:
 
 
     def feature_matching(self):
-        self.kp1_np = []
-        self.kp2_np = []
-        
-        sift = cv2.SIFT_create()
-        
-        img1 = copy.copy(self.img1_rectify)
-        img2 = copy.copy(self.img2_rectify)
-        kp1, des1 = sift.detectAndCompute(img1, None)
-        kp2, des2 = sift.detectAndCompute(img2, None)
+        stereo = cv2.StereoBM_create(numDisparities=16*6, blockSize=15)
+        disparity = stereo.compute(self.img1_rectify, self.img2_rectify)
+        points_3d = cv2.reprojectImageTo3D(disparity, self.Q)
 
+        # 获取有效视差点
+        mask = disparity < 300
+        points = points_3d[mask]
+        colors = cv2.cvtColor(self.img1_rectify, cv2.COLOR_GRAY2BGR)[mask] / 255.0
 
-        bf = cv2.BFMatcher()
-        matches = bf.knnMatch(des1, des2, k=2)
+        # 创建Open3D点云对象
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points)
+        pcd.colors = o3d.utility.Vector3dVector(colors)
 
-        good = []
-        for m, n in matches:
-            if m.distance < 0.75 * n.distance:
-                pt_1 = kp1[m.queryIdx].pt
-                pt_2 = kp2[m.trainIdx].pt
-
-                if abs(pt_1[1] - pt_2[1]) < 3:
-                    self.kp1_np.append(pt_1)
-                    self.kp2_np.append(pt_2)
-                    good.append([m])
-
-        self.kp1_np = np.array(self.kp1_np)
-        self.kp2_np = np.array(self.kp2_np)
-        img_matches = cv2.drawMatchesKnn(img1, kp1, img2, kp2, good, None, flags=2)
+        # 保存为.ply文件
+        o3d.io.write_point_cloud("test.ply", pcd)
         # cv2.imwrite('test.png', img_matches)
         # Convert keypoints to numpy arrays
 
 
-        return img_matches
+        return disparity
     
 
     def triangulate_points(self):
