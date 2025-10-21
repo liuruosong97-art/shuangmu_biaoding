@@ -16,13 +16,21 @@ class JieGouGuang:
 
         self.max_dis = 2000
         self.min_dis = 100
+        # 最近最远深度
+
+        self.binary_image_threshold = [19,-4]
+        # 自适应二值化的两个参数
+        self.contourArea_threshold = 30
+        # 过滤光斑的参数
+        self.lightfilter_threshold = 0
+        # 按照亮度过滤的参数
 
     def extract_circle(self):
         # centers_img1,img1_with_center = self.extract_circle_1(self.img1)
         # centers_img2,img2_with_center = self.extract_circle_1(self.img2)
 
         centers_img1,img1_with_center, _ = self.extract_circle_subpixel(self.img1,method='gaussian')
-        centers_img2,img2_with_center, _ = self.extract_circle_subpixel(self.img1,method='gaussian')
+        centers_img2,img2_with_center, _ = self.extract_circle_subpixel(self.img2,method='gaussian')
         self.centers_img1 = centers_img1
         self.centers_img2 = centers_img2
         return img1_with_center,img2_with_center
@@ -32,12 +40,12 @@ class JieGouGuang:
         H,W = img.shape
         mean_light = img.mean()
         binary_image = cv2.adaptiveThreshold(
-            img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 19, -4
+            img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, self.binary_image_threshold[0], self.binary_image_threshold[1]
         )
         
         contours_filtered = []
         for contour in cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
-            if cv2.contourArea(contour) < 30:
+            if cv2.contourArea(contour) < self.contourArea_threshold:
                 contours_filtered.append(contour)
         contours = contours_filtered
 
@@ -72,8 +80,8 @@ class JieGouGuang:
             # 计算放大后中心点坐标
             # 先计算local_patch中最亮点的坐标
             min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(local_patch)
-            # if max_val < 150:
-            #     continue
+            if max_val < self.lightfilter_threshold:
+                continue
             # 放大坐标
             max_loc_resized = (max_loc[0] * beishu, max_loc[1] * beishu)
             # 在放大后的patch上绘制中心
@@ -98,95 +106,6 @@ class JieGouGuang:
             center_extracted.append([cx,cy])
         return np.array(center_extracted), img_with_center
     
-    def feature_extracting_1(self,centers_img,n_neighbors = 5):
-        centers_img = np.array(centers_img)
-        # 如果没有点或点数量小于2，直接返回空数组
-        if centers_img.size == 0 or centers_img.shape[0] < 2:
-            return np.zeros((0, 0, 2))
-
-        nbrs = NearestNeighbors(n_neighbors=min(n_neighbors, centers_img.shape[0]-1) + 1, algorithm='auto').fit(centers_img)
-        distances, indices = nbrs.kneighbors(centers_img)
-        # 排除自身（第一列）
-        neighbors_idx = indices[:, 1:]
-        neighbors_xy = centers_img[neighbors_idx]
-
-        # 计算每个邻近点相对于当前点的坐标差：neighbor - point
-        # centers_img 形状 (N,2) -> 扩展为 (N,1,2) 与 neighbors_xy (N,k,2) 广播
-        diffs = neighbors_xy - centers_img[:, None, :]
-        return diffs
-
-    def feature_extracting_1_sift(self, centers_img, img, patch_size=32):
-        """为每个中心点计算 SIFT 描述子。
-
-        参数:
-            centers_img: (N,2) 数组或可转为 numpy 的中心点列表
-            img: 灰度图像，若为 None 使用 self.img1_rectify
-            patch_size: 用于判断边界的半边长
-
-        返回:
-            descriptors: (N,128) numpy 数组，无法计算的位置填 0
-            valid_mask: (N,) 布尔数组，表示该点是否成功计算到描述子
-        """
-        centers = np.array(centers_img)
-
-        # 确保为灰度单通道
-        if len(img.shape) == 3:
-            img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        else:
-            img_gray = img
-
-
-        # extracter = cv2.SIFT_create()
-        extracter = cv2.ORB_create()
-
-        keypoints = []
-        valid_mask = np.ones((centers.shape[0],), dtype=bool)
-        h, w = img_gray.shape[:2]
-        half = int(patch_size // 2)
-        for i, (x, y) in enumerate(centers):
-            xi = int(round(x)); yi = int(round(y))
-            # 边界检查：若关键点太靠近边界，标为无效（也可选择裁剪后计算）
-            if xi - half < 0 or yi - half < 0 or xi + half >= w or yi + half >= h:
-                valid_mask[i] = False
-                # still create a keypoint to keep indexing consistent, but will have no descriptor
-                keypoints.append(cv2.KeyPoint(float(xi), float(yi), float(patch_size)))
-            else:
-                # 切出 patch 并保存为图片
-                # patch = img_gray[yi - half:yi + half, xi - half:xi + half]
-                # save_path = f"test.png"
-                # cv2.imwrite(save_path, patch)
-                keypoints.append(cv2.KeyPoint(float(xi), float(yi), float(patch_size)))
-
-        # 计算描述子
-        kp, des = extracter.compute(img_gray, keypoints)
-
-        # 如果没有返回描述子，返回空
-        if des is None or len(kp) == 0:
-            return np.zeros((0, 128), dtype=np.float32), np.zeros((0,2), dtype=np.float32)
-
-        # 因为输入 keypoints 顺序通常与返回 kp 顺序一致，优先尝试直接一一对应
-        coords_out = []
-        descs_out = []
-        if len(kp) == len(keypoints):
-            # 直接对应
-            for i_k, kp_i in enumerate(kp):
-                xpt, ypt = kp_i.pt
-                coords_out.append([xpt, ypt])
-                descs_out.append(des[i_k])
-        else:
-            # 回退：基于坐标最近邻分配
-            pts_out = np.array([kp_i.pt for kp_i in kp])
-            for i_k, pt in enumerate(pts_out):
-                dists = (centers[:, 0] - pt[0]) ** 2 + (centers[:, 1] - pt[1]) ** 2
-                idx = int(np.argmin(dists))
-                coords_out.append([centers[idx,0], centers[idx,1]])
-                descs_out.append(des[i_k])
-
-        coords_arr = np.array(coords_out, dtype=np.float32)
-        descs_arr = np.array(descs_out, dtype=np.float32)
-        return coords_arr, descs_arr
-
-
     def extract_circle_subpixel(self, img, method='gaussian', visualize=False, save_path='subpixel_test'):
         """
         亚像素精度圆心检测方法 - 保留两种方法
@@ -210,13 +129,13 @@ class JieGouGuang:
 
         # 自适应阈值二值化
         binary_image = cv2.adaptiveThreshold(
-            img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 19, -4
+            img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, self.binary_image_threshold[0], self.binary_image_threshold[1]
         )
 
         # 连通域过滤
         contours_filtered = []
         for contour in cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
-            if cv2.contourArea(contour) < 20:
+            if cv2.contourArea(contour) < self.contourArea_threshold:
                 contours_filtered.append(contour)
         contours = contours_filtered
 
@@ -250,7 +169,7 @@ class JieGouGuang:
             local_patch = img[y_start:y_end, x_start:x_end].astype(np.float64)
 
             # 亮度过滤
-            if local_patch.max() < 150:
+            if local_patch.max() < self.lightfilter_threshold:
                 continue
 
             patch_h, patch_w = local_patch.shape
@@ -386,6 +305,97 @@ class JieGouGuang:
 
         return np.array(center_extracted), img_with_center, comparison_images
 
+
+    def feature_extracting_1_dis(self,centers_img,n_neighbors = 5):
+        centers_img = np.array(centers_img)
+        # 如果没有点或点数量小于2，直接返回空数组
+        if centers_img.size == 0 or centers_img.shape[0] < 2:
+            return np.zeros((0, 0, 2))
+
+        nbrs = NearestNeighbors(n_neighbors=min(n_neighbors, centers_img.shape[0]-1) + 1, algorithm='auto').fit(centers_img)
+        distances, indices = nbrs.kneighbors(centers_img)
+        # 排除自身（第一列）
+        neighbors_idx = indices[:, 1:]
+        neighbors_xy = centers_img[neighbors_idx]
+
+        # 计算每个邻近点相对于当前点的坐标差：neighbor - point
+        # centers_img 形状 (N,2) -> 扩展为 (N,1,2) 与 neighbors_xy (N,k,2) 广播
+        diffs = neighbors_xy - centers_img[:, None, :]
+        return diffs
+
+    def feature_extracting_1(self, centers_img, img, patch_size=32):
+        """为每个中心点计算 SIFT orb 描述子。
+
+        参数:
+            centers_img: (N,2) 数组或可转为 numpy 的中心点列表
+            img: 灰度图像，若为 None 使用 self.img1_rectify
+            patch_size: 用于判断边界的半边长
+
+        返回:
+            descriptors: (N,128) numpy 数组，无法计算的位置填 0
+            valid_mask: (N,) 布尔数组，表示该点是否成功计算到描述子
+        """
+        centers = np.array(centers_img)
+
+        # 确保为灰度单通道
+        if len(img.shape) == 3:
+            img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        else:
+            img_gray = img
+
+
+        # extracter = cv2.SIFT_create()
+        extracter = cv2.ORB_create()
+
+        keypoints = []
+        valid_mask = np.ones((centers.shape[0],), dtype=bool)
+        h, w = img_gray.shape[:2]
+        half = int(patch_size // 2)
+        for i, (x, y) in enumerate(centers):
+            xi = int(round(x)); yi = int(round(y))
+            # 边界检查：若关键点太靠近边界，标为无效（也可选择裁剪后计算）
+            if xi - half < 0 or yi - half < 0 or xi + half >= w or yi + half >= h:
+                valid_mask[i] = False
+                # still create a keypoint to keep indexing consistent, but will have no descriptor
+                keypoints.append(cv2.KeyPoint(float(xi), float(yi), float(patch_size)))
+            else:
+                # 切出 patch 并保存为图片
+                # patch = img_gray[yi - half:yi + half, xi - half:xi + half]
+                # save_path = f"test.png"
+                # cv2.imwrite(save_path, patch)
+                keypoints.append(cv2.KeyPoint(float(xi), float(yi), float(patch_size)))
+
+        # 计算描述子
+        kp, des = extracter.compute(img_gray, keypoints)
+
+        # 如果没有返回描述子，返回空
+        if des is None or len(kp) == 0:
+            return np.zeros((0, 128), dtype=np.float32), np.zeros((0,2), dtype=np.float32)
+
+        # 因为输入 keypoints 顺序通常与返回 kp 顺序一致，优先尝试直接一一对应
+        coords_out = []
+        descs_out = []
+        if len(kp) == len(keypoints):
+            # 直接对应
+            for i_k, kp_i in enumerate(kp):
+                xpt, ypt = kp_i.pt
+                coords_out.append([xpt, ypt])
+                descs_out.append(des[i_k])
+        else:
+            # 回退：基于坐标最近邻分配
+            pts_out = np.array([kp_i.pt for kp_i in kp])
+            for i_k, pt in enumerate(pts_out):
+                dists = (centers[:, 0] - pt[0]) ** 2 + (centers[:, 1] - pt[1]) ** 2
+                idx = int(np.argmin(dists))
+                coords_out.append([centers[idx,0], centers[idx,1]])
+                descs_out.append(des[i_k])
+
+        coords_arr = np.array(coords_out, dtype=np.float32)
+        descs_arr = np.array(descs_out, dtype=np.float32)
+        return coords_arr, descs_arr
+
+
+
     def import_biaodin(self,extri_path,intri_path):
         extri = cv2.FileStorage(extri_path, cv2.FILE_STORAGE_READ)
         intri = cv2.FileStorage(intri_path, cv2.FILE_STORAGE_READ)
@@ -438,8 +448,8 @@ class JieGouGuang:
         centers_img1 = self.centers_img1
         centers_img2 = self.centers_img2
 
-        coords_arr_img1, descs_arr_img1 = self.feature_extracting_1_sift(centers_img1, self.img1_rectify,patch_size=32)
-        coords_arr_img2, descs_arr_img2 = self.feature_extracting_1_sift(centers_img2, self.img2_rectify,patch_size=32)
+        coords_arr_img1, descs_arr_img1 = self.feature_extracting_1(centers_img1, self.img1_rectify,patch_size=32)
+        coords_arr_img2, descs_arr_img2 = self.feature_extracting_1(centers_img2, self.img2_rectify,patch_size=32)
         # features_img1 = self.feature_extracting_1(centers_img1,n_neighbors = 10)
         # features_img2 = self.feature_extracting_1(centers_img2,n_neighbors = 10)
 
@@ -450,7 +460,7 @@ class JieGouGuang:
         self.features_img2 = descs_arr_img2
 
 
-    def feature_matching(self):
+    def feature_matching_dis(self):
 
         y_tol = 3.0
         max_spatial_dist = 200
@@ -581,8 +591,8 @@ class JieGouGuang:
 
         return self.kp1_np, self.kp2_np
 
-    def feature_matching_sift(self, y_tol=1.0, mutual_check=True, ratio=1.0):
-        """使用 SIFT 描述子在两幅矫正图上进行受限匹配（仅在近似同一行匹配）。
+    def feature_matching(self, y_tol=1.0, mutual_check=True, ratio=1.0):
+        """使用 SIFT ORB 描述子在两幅矫正图上进行受限匹配（仅在近似同一行匹配）。
 
         返回: self.kp1_np, self.kp2_np（匹配点坐标，float32）并保存可视化到 self.match_img
         """
@@ -716,13 +726,6 @@ class JieGouGuang:
         return self.kp1_np, self.kp2_np
 
 
-    def triangulate_points(self):
-        
-        pts1 = self.kp1_np.T
-        pts2 = self.kp2_np.T
-        # points_4d_hom = cv2.triangulatePoints(P1, P2, pts1, pts2)
-
-        pass
 
     def draw_chess_board(self, img1, img2):
         # Find chessboard corners

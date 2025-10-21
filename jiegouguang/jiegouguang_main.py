@@ -24,7 +24,7 @@ img1_with_center,img2_with_center = jiegouguang_class.extract_circle()
 
 jiegouguang_class.feature_extracting()
 
-jiegouguang_class.feature_matching_sift()
+jiegouguang_class.feature_matching()
 
 jiegouguang_class.pointcloud_from_disparity()
 
