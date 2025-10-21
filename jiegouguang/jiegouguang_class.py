@@ -11,9 +11,11 @@ class JieGouGuang:
         self.img2 = cv2.cvtColor(cv2.imread(img2_path), cv2.COLOR_BGR2GRAY)
 
     def extract_circle(self):
-        centers_img1,img1_with_center = self.extract_circle_1(self.img1)
-        centers_img2,img2_with_center = self.extract_circle_1(self.img2)
+        # centers_img1,img1_with_center = self.extract_circle_1(self.img1)
+        # centers_img2,img2_with_center = self.extract_circle_1(self.img2)
 
+        centers_img1,img1_with_center, _ = self.extract_circle_subpixel(self.img1,method='gaussian')
+        centers_img2,img2_with_center, _ = self.extract_circle_subpixel(self.img1,method='gaussian')
         self.centers_img1 = centers_img1
         self.centers_img2 = centers_img2
         return img1_with_center,img2_with_center
@@ -93,7 +95,7 @@ class JieGouGuang:
             center_extracted.append([cx,cy])
         return np.array(center_extracted), img_with_center
 
-    def extract_circle_subpixel(self, img, method='gaussian', visualize=True, save_path='subpixel_test'):
+    def extract_circle_subpixel(self, img, method='gaussian', visualize=False, save_path='subpixel_test'):
         """
         亚像素精度圆心检测方法 - 保留两种方法
 
@@ -134,8 +136,8 @@ class JieGouGuang:
         img_with_center = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
         center_extracted = []
         comparison_images = {}
-
-        os.makedirs(save_path, exist_ok=True)
+        if visualize:
+            os.makedirs(save_path, exist_ok=True)
 
         spot_idx = 0
         for contour in contours:
