@@ -13,7 +13,7 @@ class SGBM:
             super().__init__(*args, **kwargs)
 
     
-    def sgbm(self, min_disparity=0, num_disparities=64, block_size=3,
+    def sgbm(self, block_size=3,
              invalidate_nonpositive=True, depth_clip=True,
              build_pointcloud=True, return_all=False):
         """运行 SGBM 获取视差与深度，并在内部由深度图生成点云。"""
@@ -23,16 +23,24 @@ class SGBM:
 
         img_channels = 1
         stereo = cv2.StereoSGBM_create(
-            minDisparity=min_disparity,
-            numDisparities=num_disparities,
+            minDisparity=0,
+            numDisparities=int(self.max_disp//16*16),
             blockSize=block_size,
+            # 惩罚项 P1，当视差变化为 1 时的罚分；常取 8 * 通道数 * block_size^2
             P1=8 * img_channels * block_size * block_size,
+            # 惩罚项 P2，当视差变化大于 1 时的罚分；常取 32 * 通道数 * block_size^2
             P2=32 * img_channels * block_size * block_size,
+            # 左右一致性检查允许的视差差异，-1 表示禁用
             disp12MaxDiff=-1,
+            # 预滤波上限，用于归一化图像亮度
             preFilterCap=1,
+            # 代价唯一性比率，越大越严格
             uniquenessRatio=10,
+            # 去散斑的窗口尺寸
             speckleWindowSize=100,
+            # 去散斑的视差差异阈值
             speckleRange=100,
+            # 使用较稳定的 HH 模式
             mode=cv2.STEREO_SGBM_MODE_HH
         )
 

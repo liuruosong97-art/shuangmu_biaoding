@@ -11,3 +11,5 @@ d455_jiegouguang_save
 whx_biaoding
 wucha/plots_rep/*
 wucha/stereo_fullfactorial_Zsweep.csv
+.vscode/*
+jiegouguang/FoundationStereo/pretrained_models/23-51-11/model_best_bp2.pth

@@ -6,7 +6,7 @@ from manual_feature.ManualFeature import ManualFeatureJieGouGuang
 
 from sgbm.sgbm import SGBM
 
-
+from FoundationStereo.stereo_inference import StereoInference
 
 class JieGouGuang:
     def __init__(self,img1_path,img2_path):
@@ -93,5 +93,16 @@ class JieGouGuang:
         processor = SGBM(base=self)
 
         pcd = processor.sgbm()
+
+        return pcd
+    
+
+    def foundation_stereo(self):
+        processor = StereoInference("jiegouguang/FoundationStereo/pretrained_models/23-51-11/model_best_bp2.pth")
+
+        results = processor.infer(self.img1_rectify, self.img2_rectify, self.K1, abs(float(self.cam_t[0])))
+        pcd_np = results['points_cam1'].astype(np.float64).reshape(-1, 3)
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(pcd_np)
 
         return pcd
