@@ -3,6 +3,7 @@ import numpy as np
 import copy
 import open3d as o3d
 from manual_feature.ManualFeature import ManualFeatureJieGouGuang
+from NeuralFeature import NeuralFeatureJieGouGuang
 
 from sgbm.sgbm import SGBM
 
@@ -106,3 +107,129 @@ class JieGouGuang:
         pcd.points = o3d.utility.Vector3dVector(pcd_np)
 
         return pcd
+
+    def neural_feature_extracting(self):
+        """
+        使用神经网络（SuperPoint + LightGlue）进行特征提取和匹配
+
+        Returns:
+            pcd: Open3D 点云对象
+        """
+        processor = NeuralFeatureJieGouGuang(base=self)
+
+        img1_with_center, img2_with_center = processor.extract_circle()
+        processor.feature_extracting()
+        processor.feature_matching()
+        pcd = processor.pointcloud_from_disparity()
+
+        return pcd
+
+    def extract_circle_1(self, img, use_subpixel=False):
+        """
+        从图像中提取圆心位置（用于神经网络特征提取）
+
+        Args:
+            img: 灰度图像
+            use_subpixel: 是否使用亚像素精度检测（默认False）
+
+        Returns:
+            center_extracted: 圆心坐标数组 (N, 2)
+            img_with_center: 标记了圆心的图像
+        """
+        H, W = img.shape
+        binary_image = cv2.adaptiveThreshold(
+            img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY,
+            self.binary_image_threshold[0], self.binary_image_threshold[1]
+        )
+
+        # 只保留小面积连通域
+        contours_filtered = []
+        for contour in cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
+            if cv2.contourArea(contour) < self.contourArea_threshold:
+                contours_filtered.append(contour)
+        contours = contours_filtered
+
+        # 重新绘制二值化图
+        binary_image_filtered = np.zeros_like(binary_image)
+        cv2.drawContours(binary_image_filtered, contours, -1, 255, -1)
+        binary_image = binary_image_filtered
+
+        img_with_center = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        center_extracted = []
+
+        for contour in contours:
+            M = cv2.moments(contour)
+            if M["m00"] == 0:
+                continue
+            cX = int(M["m10"] / M["m00"])
+            cY = int(M["m01"] / M["m00"])
+
+            # 选择光斑周围的区域
+            bbox_size = 5 if use_subpixel else 3  # 亚像素需要更大窗口
+            y_start = max(0, cY - bbox_size)
+            y_end = min(H, cY + bbox_size)
+            x_start = max(0, cX - bbox_size)
+            x_end = min(W, cX + bbox_size)
+            local_patch = img[y_start:y_end, x_start:x_end]
+
+            # 计算最亮点坐标
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(local_patch)
+
+            # 亮度过滤（如果设置了阈值）
+            if self.lightfilter_threshold > 0 and max_val < self.lightfilter_threshold:
+                continue
+
+            if use_subpixel:
+                # 亚像素精度 - 高斯拟合法
+                from scipy.optimize import curve_fit
+                try:
+                    patch_float = local_patch.astype(np.float64)
+                    patch_h, patch_w = patch_float.shape
+
+                    # 2D高斯函数
+                    def gaussian_2d(xy, amplitude, xo, yo, sigma_x, sigma_y, offset):
+                        x, y = xy
+                        xo = float(xo)
+                        yo = float(yo)
+                        g = offset + amplitude * np.exp(
+                            -(((x - xo) ** 2) / (2 * sigma_x ** 2) +
+                              ((y - yo) ** 2) / (2 * sigma_y ** 2))
+                        )
+                        return g.ravel()
+
+                    # 创建网格
+                    x = np.arange(0, patch_w)
+                    y = np.arange(0, patch_h)
+                    x, y = np.meshgrid(x, y)
+
+                    # 初始参数估计
+                    initial_guess = (
+                        patch_float.max() - patch_float.min(),
+                        patch_w / 2,
+                        patch_h / 2,
+                        1.0, 1.0,
+                        patch_float.min()
+                    )
+
+                    # 高斯拟合
+                    popt, _ = curve_fit(
+                        gaussian_2d, (x, y), patch_float.ravel(),
+                        p0=initial_guess, maxfev=5000
+                    )
+
+                    # 亚像素中心
+                    center_x = x_start + popt[1]
+                    center_y = y_start + popt[2]
+                except:
+                    # 拟合失败，回退到最亮点法
+                    center_x = x_start + max_loc[0]
+                    center_y = y_start + max_loc[1]
+            else:
+                # 像素级精度 - 最亮点法
+                center_x = x_start + max_loc[0]
+                center_y = y_start + max_loc[1]
+
+            cv2.circle(img_with_center, (int(center_x), int(center_y)), 1, (0, 0, 255), -1)
+            center_extracted.append([center_x, center_y])
+
+        return np.array(center_extracted), img_with_center
