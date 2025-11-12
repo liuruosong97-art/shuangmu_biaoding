@@ -169,6 +169,68 @@ class JieGouGuang:
                 cv2.line(h_img, pt1, pt2, (0,0,255), 1)
                 
             return h_img
-        
+
         return None
+
+    def bridgedepth_stereo_matching(
+        self,
+        checkpoint_path=None,
+        model_name='rvc_pretrain',
+        device='cuda',
+        z_min=0.1,
+        z_max=10.0,
+        baseline=None
+    ):
+        """
+        使用 BridgeDepth 深度学习进行立体匹配
+
+        需要先调用 import_biaodin() 导入标定参数
+
+        参数:
+            checkpoint_path: 模型权重路径（可选）
+            model_name: 预训练模型名称（默认: rvc_pretrain）
+            device: 设备 ('cuda' 或 'cpu')
+            z_min: 最小深度（米）
+            z_max: 最大深度（米）
+            baseline: 基线距离（米），如果为 None 则从标定参数计算
+
+        返回:
+            results: 字典，包含:
+                - 'disparity': 视差图 (H, W)
+                - 'depth': 深度图 (H, W) 米
+                - 'xyz_map': XYZ坐标图 (H, W, 3) 米
+                - 'pointcloud': Open3D点云对象
+        """
+        from .bridgedepth_stereo import BridgeDepthStereo
+
+        # 检查是否已导入标定参数
+        if not hasattr(self, 'K1'):
+            raise ValueError("请先调用 import_biaodin() 导入标定参数")
+
+        # 计算基线（如果未提供）
+        if baseline is None:
+            if hasattr(self, 'cam_t'):
+                baseline = float(np.linalg.norm(self.cam_t))
+            else:
+                raise ValueError("无法计算基线，请提供 baseline 参数或确保标定参数中包含平移向量")
+
+        # 初始化 BridgeDepthStereo（第一步）
+        stereo = BridgeDepthStereo(
+            checkpoint_path=checkpoint_path,
+            model_name=model_name,
+            device=device
+        )
+
+        # 执行推理（第二步）
+        results = stereo.infer(
+            left_image=self.img1_rectify,
+            right_image=self.img2_rectify,
+            K=self.K1,
+            baseline=baseline,
+            z_min=z_min,
+            z_max=z_max,
+            return_pointcloud=True
+        )
+
+        return results
 
