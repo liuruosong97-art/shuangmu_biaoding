@@ -2,12 +2,13 @@ import cv2
 import numpy as np
 import copy
 import open3d as o3d
+
+# 下面都是自己实现的各种方法
 from manual_feature.ManualFeature import ManualFeatureJieGouGuang
-from NeuralFeature import NeuralFeatureJieGouGuang
-
+from LightGlue_feature.NeuralFeature import NeuralFeatureJieGouGuang
 from sgbm.sgbm import SGBM
-
 from FoundationStereo.stereo_inference import StereoInference
+from bridgedepth.bridgedepth_stereo import BridgeDepthStereo
 
 class JieGouGuang:
     def __init__(self,img1_path,img2_path):
@@ -17,7 +18,7 @@ class JieGouGuang:
         self.img2 = cv2.cvtColor(cv2.imread(img2_path), cv2.COLOR_BGR2GRAY)
 
         self.max_dis = 1500
-        self.min_dis = 300
+        self.min_dis = 100
         # 最近最远深度
 
         self.binary_image_threshold = [19,-4]
@@ -99,7 +100,7 @@ class JieGouGuang:
     
 
     def foundation_stereo(self):
-        processor = StereoInference("jiegouguang/FoundationStereo/pretrained_models/23-51-11/model_best_bp2.pth")
+        processor = StereoInference("jiegouguang/weights/FoundationStereo/23-51-11/model_best_bp2.pth")
 
         results = processor.infer(self.img1_rectify, self.img2_rectify, self.K1, abs(float(self.cam_t[0])))
         pcd_np = results['points_cam1'].astype(np.float64).reshape(-1, 3)
@@ -124,6 +125,64 @@ class JieGouGuang:
 
         self.pcd = pcd
         return pcd
+
+
+
+    def bridgedepth_stereo_matching(
+        self,
+        checkpoint_path="jiegouguang/weights/BridgeDepth/bridge_rvc_pretrain.pth",
+        model_name='rvc_pretrain',
+        device='cuda',
+        # z_min=0.1,
+        # z_max=10.0,
+    ):
+        """
+        使用 BridgeDepth 深度学习进行立体匹配
+
+        需要先调用 import_biaodin() 导入标定参数
+
+        参数:
+            checkpoint_path: 模型权重路径（可选）
+            model_name: 预训练模型名称（默认: rvc_pretrain）
+            device: 设备 ('cuda' 或 'cpu')
+            z_min: 最小深度（米）
+            z_max: 最大深度（米）
+            baseline: 基线距离（米），如果为 None 则从标定参数计算
+
+        返回:
+            results: 字典，包含:
+                - 'disparity': 视差图 (H, W)
+                - 'depth': 深度图 (H, W) 米
+                - 'xyz_map': XYZ坐标图 (H, W, 3) 米
+                - 'pointcloud': Open3D点云对象
+        """
+        
+        z_min = self.min_dis
+        z_max = self.max_dis
+        baseline = abs(float(self.cam_t[0]))
+
+
+        # 初始化 BridgeDepthStereo（第一步）
+        stereo = BridgeDepthStereo(
+            checkpoint_path=checkpoint_path,
+            model_name=model_name, 
+            device=device
+        )
+
+        # 执行推理（第二步）
+        results = stereo.infer(
+            left_image=self.img1_rectify,
+            right_image=self.img2_rectify,
+            K=self.K1,
+            baseline=baseline,
+            z_min=z_min,
+            z_max=z_max,
+            return_pointcloud=True
+        )
+
+        return results['pointcloud']
+
+
 
     def cal_error(self,pcd):
 
