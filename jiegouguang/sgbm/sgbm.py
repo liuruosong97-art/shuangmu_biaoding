@@ -101,4 +101,4 @@ class SGBM:
 
         if return_all:
             return disparity_raw, depth_map, pcd, disparity_vis
-        return pcd
+        return disparity_raw

@@ -5,6 +5,14 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "jiegouguang_main",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "jiegouguang/jiegouguang_main.py",
+            "console": "integratedTerminal",
+            "args": []
+        },
+        {
             "name": "stereo_error_sweep",
             "type": "debugpy",
             "request": "launch",
@@ -37,14 +45,7 @@
             "console": "integratedTerminal",
             "args": []
         },
-        {
-            "name": "jiegouguang_main",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "jiegouguang/jiegouguang_main.py",
-            "console": "integratedTerminal",
-            "args": []
-        },
+
         {
             "name": "realsense2_capture",
             "type": "debugpy",

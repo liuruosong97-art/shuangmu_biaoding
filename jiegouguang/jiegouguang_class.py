@@ -28,6 +28,8 @@ class JieGouGuang:
         self.lightfilter_threshold = 0
         # 按照亮度过滤的参数
 
+        self.method = None
+
     def import_biaodin(self,extri_path,intri_path):
         extri = cv2.FileStorage(extri_path, cv2.FILE_STORAGE_READ)
         intri = cv2.FileStorage(intri_path, cv2.FILE_STORAGE_READ)
@@ -81,6 +83,34 @@ class JieGouGuang:
         self.max_disp = f * B / self.min_dis  # for closest points
         self.min_disp = f * B / self.max_dis  # for farthest points
 
+    def forward_disparity(self):
+        if self.method == 'sgbm':
+            disparity_raw = self.sgbm()
+            return disparity_raw
+        elif self.method == 'foundation_stereo':
+            disparity_raw = self.foundation_stereo()
+            return disparity_raw
+        elif self.method == 'bridgedepth':
+            disparity_raw = self.bridgedepth_stereo_matching()
+            return disparity_raw
+
+    def init_model(self):
+        if self.method == 'sgbm':
+            self.processor = SGBM(base=self)
+
+        elif self.method == 'foundation_stereo':
+            self.processor = StereoInference("jiegouguang/weights/FoundationStereo/23-51-11/model_best_bp2.pth")
+        elif self.method == 'bridgedepth':
+            checkpoint_path="jiegouguang/weights/BridgeDepth/bridge_rvc.pth"
+            model_name='rvc'
+            device='cuda'
+            self.processor = BridgeDepthStereo(
+                checkpoint_path=checkpoint_path,
+                model_name=model_name, 
+                device=device
+            )
+
+
     def manual_feature_extracting(self):
         processor = ManualFeatureJieGouGuang(base=self)
 
@@ -91,23 +121,25 @@ class JieGouGuang:
 
         return pcd
     
-    def sgbm(self):
-        processor = SGBM(base=self)
 
-        pcd = processor.sgbm()
+    def sgbm(self):
+        # processor = SGBM(base=self)
+
+        pcd = self.processor.sgbm(build_pointcloud = False)
         self.pcd = pcd
         return pcd
     
 
     def foundation_stereo(self):
-        processor = StereoInference("jiegouguang/weights/FoundationStereo/23-51-11/model_best_bp2.pth")
+        
 
-        results = processor.infer(self.img1_rectify, self.img2_rectify, self.K1, abs(float(self.cam_t[0])))
-        pcd_np = results['points_cam1'].astype(np.float64).reshape(-1, 3)
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(pcd_np)
-        self.pcd = pcd
-        return pcd
+        results = self.processor.infer(self.img1_rectify, self.img2_rectify, self.K1, abs(float(self.cam_t[0])))
+        # pcd_np = results['points_cam1'].astype(np.float64).reshape(-1, 3)
+        # pcd = o3d.geometry.PointCloud()
+        # pcd.points = o3d.utility.Vector3dVector(pcd_np)
+        # self.pcd = pcd
+        return results['disparity']
+
 
     def lg_feature_extracting(self):
         """
@@ -127,12 +159,8 @@ class JieGouGuang:
         return pcd
 
 
-
     def bridgedepth_stereo_matching(
-        self,
-        checkpoint_path="jiegouguang/weights/BridgeDepth/bridge_rvc_pretrain.pth",
-        model_name='rvc_pretrain',
-        device='cuda',
+        self
         # z_min=0.1,
         # z_max=10.0,
     ):
@@ -163,24 +191,22 @@ class JieGouGuang:
 
 
         # 初始化 BridgeDepthStereo（第一步）
-        stereo = BridgeDepthStereo(
-            checkpoint_path=checkpoint_path,
-            model_name=model_name, 
-            device=device
-        )
+
 
         # 执行推理（第二步）
-        results = stereo.infer(
+        results = self.processor.infer(
             left_image=self.img1_rectify,
             right_image=self.img2_rectify,
             K=self.K1,
             baseline=baseline,
             z_min=z_min,
             z_max=z_max,
-            return_pointcloud=True
+            return_pointcloud=False
         )
 
-        return results['pointcloud']
+
+        return results['disparity']
+
 
 
 
@@ -209,3 +235,63 @@ class JieGouGuang:
         print(f'Mean abs distance: {abs_dist.mean():.6f}')
         print(f'RMS distance: {rms_error:.6f}')
         print(f'Max abs distance: {abs_dist.max():.6f}')
+
+
+    def depth2pointcloud(self,depth):
+        """
+        将深度图转换为 Open3D 点云。深度值与 self.K1 对应的相机坐标系一致。
+
+        Args:
+            depth (np.ndarray): 单通道深度图，单位与外部流程保持一致。
+
+        Returns:
+            o3d.geometry.PointCloud: 生成的点云。
+        """
+
+        if depth is None:
+            raise ValueError('depth cannot be None')
+        if not hasattr(self, 'K1'):
+            raise ValueError('camera intrinsics (self.K1) are not set, call import_biaodin() first')
+        if depth.ndim != 2:
+            raise ValueError('depth must be a single-channel image')
+
+        fx = float(self.K1[0, 0])
+        fy = float(self.K1[1, 1])
+        cx = float(self.K1[0, 2])
+        cy = float(self.K1[1, 2])
+        if fx == 0 or fy == 0:
+            raise ValueError('invalid camera intrinsics: focal length cannot be zero')
+
+        depth = depth.astype(np.float64)
+        rows, cols = np.indices(depth.shape)
+        valid_mask = np.isfinite(depth) & (depth > 0)
+        if hasattr(self, 'max_dis'):
+            valid_mask &= depth <= float(self.max_dis)
+
+        if not np.any(valid_mask):
+            return o3d.geometry.PointCloud()
+
+        z = depth[valid_mask]
+        u = cols[valid_mask]
+        v = rows[valid_mask]
+
+        x = (u - cx) * z / fx
+        y = (v - cy) * z / fy
+        points = np.stack((x, y, z), axis=-1)
+
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points)
+
+        # 使用对应像素灰度作为伪彩色，方便可视化
+        base_img = getattr(self, 'img1_rectify', getattr(self, 'img1', None))
+        if base_img is not None and base_img.shape[:2] == depth.shape:
+            if base_img.ndim == 2:
+                colors = base_img[valid_mask].astype(np.float64) / 255.0
+                colors = np.repeat(colors[:, None], 3, axis=1)
+            else:
+                colors = base_img[valid_mask].astype(np.float64) / 255.0
+            pcd.colors = o3d.utility.Vector3dVector(colors)
+
+        self.pcd = pcd
+        return pcd
+        

@@ -56,7 +56,8 @@ class BridgeDepthStereo:
         checkpoint_path: Optional[str] = None,
         model_name: str = 'rvc_pretrain',
         device: str = 'cuda',
-        logger_name: str = 'BridgeDepthStereo'
+        logger_name: str = 'BridgeDepthStereo',
+        log_out = False
     ):
         """
         初始化 BridgeDepthStereo 类
@@ -97,12 +98,13 @@ class BridgeDepthStereo:
             pretrained_model_name_or_path = checkpoint_path
 
         # 加载模型
-        self.logger.info(f"加载模型: {pretrained_model_name_or_path}")
+        if log_out: 
+            self.logger.info(f"加载模型: {pretrained_model_name_or_path}")
         self.model = BridgeDepth.from_pretrained(pretrained_model_name_or_path)
         self.model = self.model.to(self.device)
         self.model.eval()  # 设置为评估模式
-
-        self.logger.info(f"模型已加载到 {self.device}")
+        if log_out:
+            self.logger.info(f"模型已加载到 {self.device}")
 
     def infer(
         self,
@@ -112,7 +114,8 @@ class BridgeDepthStereo:
         baseline: float,
         z_min: float = 0.1,
         z_max: float = 10.0,
-        return_pointcloud: bool = True
+        return_pointcloud: bool = True,
+        log_out = False
     ) -> Dict[str, Union[np.ndarray, o3d.geometry.PointCloud]]:
         """
         执行立体匹配推理
@@ -150,12 +153,14 @@ class BridgeDepthStereo:
             f"左右图像分辨率不一致: {left_image.shape[:2]} vs {right_image.shape[:2]}"
 
         H, W = left_image.shape[:2]
-        self.logger.info(f"输入图像分辨率: {W}×{H}")
+        if log_out:
+            self.logger.info(f"输入图像分辨率: {W}×{H}")
 
         # ========== 处理灰度图 ==========
         # 如果是灰度图 (H, W)，复制为 RGB (H, W, 3)
         if left_image.ndim == 2:
-            self.logger.info("检测到灰度图，转换为 RGB")
+            if log_out:
+                self.logger.info("检测到灰度图，转换为 RGB")
             left_image = np.tile(left_image[..., None], (1, 1, 3))
         if right_image.ndim == 2:
             right_image = np.tile(right_image[..., None], (1, 1, 3))
@@ -177,14 +182,16 @@ class BridgeDepthStereo:
         # 注意: BridgeDepth 不需要相机参数！
         # 输入: 左右图像对 (1, 3, H, W)
         # 输出: 视差图 (像素单位)
-        self.logger.info("执行神经网络推理...")
+        if log_out:
+            self.logger.info("执行神经网络推理...")
         with torch.no_grad():  # 禁用梯度计算 (推理模式)
             results_dict = self.model(sample)
 
         # 提取视差预测结果
         # clamp_min(1e-3): 限制最小视差为 0.001 (避免除零)
         disparity = results_dict['disp_pred'].clamp_min(1e-3).cpu().numpy().reshape(H, W)
-        self.logger.info(f"视差范围: {disparity.min():.2f} - {disparity.max():.2f} 像素")
+        if log_out:
+            self.logger.info(f"视差范围: {disparity.min():.2f} - {disparity.max():.2f} 像素")
 
         # ========== 视差 → 深度转换 ==========
         # 核心公式: Z = (fx × B) / d
@@ -194,18 +201,22 @@ class BridgeDepthStereo:
         #   - d: 视差 (像素)
         # 输出:
         #   - Z: 深度 (米)
-        depth = K[0, 0] * baseline / disparity
-        self.logger.info(f"深度范围: {depth.min():.3f} - {depth.max():.3f} 毫米")
+        # depth = K[0, 0] * baseline / disparity
+        # if log_out:
+        #     self.logger.info(f"深度范围: {depth.min():.3f} - {depth.max():.3f} 毫米")
 
         # 准备返回结果
         results = {
             'disparity': disparity,
-            'depth': depth,
+            # 'depth': depth,
         }
 
         # ========== 深度图 → 3D 点云 (可选) ==========
         if return_pointcloud:
             self.logger.info("生成 3D 点云...")
+            depth = K[0, 0] * baseline / disparity
+            if log_out:
+                self.logger.info(f"深度范围: {depth.min():.3f} - {depth.max():.3f} 毫米")
 
             # 步骤 1: 深度图 → XYZ 坐标图
             xyz_map = self._depth2xyzmap(depth, K, z_min=z_min)
@@ -225,8 +236,8 @@ class BridgeDepthStereo:
             keep_mask = (points[:, 2] > z_min) & (points[:, 2] <= z_max)
             keep_ids = np.arange(len(points))[keep_mask]
             pcd = pcd.select_by_index(keep_ids)
-
-            self.logger.info(f"点云过滤: 保留 {len(pcd.points)} / {H*W} 个点")
+            if log_out:
+                self.logger.info(f"点云过滤: 保留 {len(pcd.points)} / {H*W} 个点")
             results['pointcloud'] = pcd
 
         return results
