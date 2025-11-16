@@ -12,10 +12,37 @@ from bridgedepth.bridgedepth_stereo import BridgeDepthStereo
 
 class JieGouGuang:
     def __init__(self,img1_path,img2_path):
-        self.img1_path = img1_path
-        self.img2_path = img2_path
-        self.img1 = cv2.cvtColor(cv2.imread(img1_path), cv2.COLOR_BGR2GRAY)
-        self.img2 = cv2.cvtColor(cv2.imread(img2_path), cv2.COLOR_BGR2GRAY)
+        # self.img1_path = img1_path
+        # self.img2_path = img2_path
+
+        def _load_media_sequence(path):
+            """Load an image or every frame from a video into a grayscale list."""
+            frames = []
+            cap = cv2.VideoCapture(path)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                while ret:
+                    frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+                    ret, frame = cap.read()
+                cap.release()
+                if frames:
+                    return frames
+            else:
+                cap.release()
+
+            img = cv2.imread(path)
+            if img is None:
+                raise ValueError(f'failed to read media from {path}')
+            return [cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)]
+
+        self.img1_list = _load_media_sequence(img1_path)
+        self.img2_list = _load_media_sequence(img2_path)
+
+        # self.img1 = self.img1_list[0]
+        # self.img2 = self.img2_list[0]
+
+        self.img1_rectify_list = []
+        self.img2_rectify_list = []
 
         self.max_dis = 1500
         self.min_dis = 100
@@ -30,7 +57,11 @@ class JieGouGuang:
 
         self.method = None
 
-    def import_biaodin(self,extri_path,intri_path):
+    def import_biaodin(self,extri_path,intri_path,idx = 0):
+        current_img1 = self.img1_list[idx]
+        current_img2 = self.img2_list[idx]
+        
+
         extri = cv2.FileStorage(extri_path, cv2.FILE_STORAGE_READ)
         intri = cv2.FileStorage(intri_path, cv2.FILE_STORAGE_READ)
 
@@ -48,7 +79,7 @@ class JieGouGuang:
         F = np.dot(np.dot(np.transpose(np.linalg.inv(M2)), np.dot(t_cross, R)), np.linalg.inv(M1))
 
 
-        h, w = self.img1.shape[:2]
+        h, w = current_img1.shape[:2]
         new_M1, roi1 = cv2.getOptimalNewCameraMatrix(M1, D1, (w, h), 1, (w, h))
         new_M2, roi2 = cv2.getOptimalNewCameraMatrix(M2, D2, (w, h), 1, (w, h))
 
@@ -72,11 +103,13 @@ class JieGouGuang:
         right_map_x, right_map_y = cv2.initUndistortRectifyMap(new_M2, D2, R2, P2, (w, h), cv2.CV_32FC1)
 
         # 进行矫正
-        left_rectified = cv2.remap(self.img1, left_map_x, left_map_y, cv2.INTER_LINEAR)
-        right_rectified = cv2.remap(self.img2, right_map_x, right_map_y, cv2.INTER_LINEAR)
+        left_rectified = cv2.remap(current_img1, left_map_x, left_map_y, cv2.INTER_LINEAR)
+        right_rectified = cv2.remap(current_img2, right_map_x, right_map_y, cv2.INTER_LINEAR)
 
         self.img1_rectify = left_rectified
         self.img2_rectify = right_rectified
+        self.img1_rectify_list.append(self.img1_rectify)
+        self.img2_rectify_list.append(self.img2_rectify)
 
         f = float(self.K1[0,0])
         B = abs(float(self.cam_t[0][0]))
